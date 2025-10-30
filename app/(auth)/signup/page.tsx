@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from 'react';
 import Link from 'next/link';
+import type { Route } from 'next';
 import { useRouter } from 'next/navigation';
 import { buttonClasses } from '@/components/ui/button';
 import type { ApiError } from '@/lib/api/http';
@@ -87,7 +88,9 @@ export default function SignUpPage() {
         terms_accepted: form.termsAccepted,
         marketing_consent: form.marketing
       });
-      router.push(`/auth/verify-email?email=${encodeURIComponent(form.email)}`);
+      type VerifyRoute = `/auth/verify-email?email=${string}`;
+      const verifyUrl = `/auth/verify-email?email=${encodeURIComponent(form.email)}` as VerifyRoute;
+      router.push(verifyUrl);
     } catch (err) {
       const apiErr = err as ApiError;
       setError(apiErr?.message || 'Registration failed. Please try again.');

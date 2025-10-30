@@ -3,6 +3,7 @@
 
 import { useState, FormEvent } from 'react';
 import Link from 'next/link';
+import type { Route } from 'next';
 import { buttonClasses } from '@/components/ui/button';
 
 const navLinks = [
@@ -11,7 +12,7 @@ const navLinks = [
   { label: 'Compliance', href: '/dashboard/policies' },
   { label: 'Reports', href: '/dashboard/reports' },
   { label: 'API Docs', href: '/docs' }
-];
+] satisfies Array<{ label: string; href: Route }>;
 
 const sastHighlights = [
   {
@@ -119,40 +120,46 @@ export default function LandingPage() {
     {
       title: 'Product',
       links: [
-        { label: 'Features', href: '#features' },
-        { label: 'Pricing', href: '#pricing' },
-        { label: 'SAST Scanner', href: '/dashboard/findings' },
-        { label: 'Compliance', href: '/dashboard/policies' }
+        { label: 'Features', href: '#features', type: 'anchor' as const },
+        { label: 'Pricing', href: '#pricing', type: 'anchor' as const },
+        { label: 'SAST Scanner', href: '/dashboard/findings' as Route },
+        { label: 'Compliance', href: '/dashboard/policies' as Route }
       ]
     },
     {
       title: 'Company',
       links: [
-        { label: 'About', href: '/about' },
-        { label: 'Careers', href: '/careers' },
-        { label: 'Trust Center', href: '/trust' },
-        { label: 'Contact', href: '/contact' }
+        { label: 'About', href: '/about' as Route },
+        { label: 'Careers', href: '/careers' as Route },
+        { label: 'Trust Center', href: '/trust' as Route },
+        { label: 'Contact', href: '/contact' as Route }
       ]
     },
     {
       title: 'Resources',
       links: [
-        { label: 'Docs', href: '/docs' },
-        { label: 'Blog', href: '/blog' },
-        { label: 'Status', href: '/status' },
-        { label: 'Guides', href: '/guides' }
+        { label: 'Docs', href: '/docs' as Route },
+        { label: 'Blog', href: '/blog' as Route },
+        { label: 'Status', href: '/status' as Route },
+        { label: 'Guides', href: '/guides' as Route }
       ]
     },
     {
       title: 'Legal',
       links: [
-        { label: 'Privacy Policy', href: '/privacy' },
-        { label: 'Terms of Service', href: '/legal' },
-        { label: 'Security', href: '/security' },
-        { label: 'Responsible Disclosure', href: '/responsible-disclosure' }
+        { label: 'Privacy Policy', href: '/privacy' as Route },
+        { label: 'Terms of Service', href: '/legal' as Route },
+        { label: 'Security', href: '/security' as Route },
+        { label: 'Responsible Disclosure', href: '/responsible-disclosure' as Route }
       ]
     }
-  ];
+  ] satisfies Array<{
+    title: string;
+    links: Array<
+      | { label: string; href: Route }
+      | { label: string; href: `#${string}`; type: 'anchor' }
+    >;
+  }>;
   const socialLinks = [
     { label: 'Twitter', href: 'https://twitter.com/' },
     { label: 'LinkedIn', href: 'https://www.linkedin.com/' },
@@ -191,7 +198,7 @@ export default function LandingPage() {
             </nav>
             <div className="flex items-center gap-3">
               <Link
-                href="/login"
+                href={'/auth/login' as Route}
                 className={buttonClasses({
                   variant: 'secondary',
                   size: 'lg',
@@ -237,7 +244,7 @@ export default function LandingPage() {
                     </Link>
                   ))}
                   <Link
-                    href="/login"
+                    href={'/auth/login' as Route}
                     onClick={() => setMenuOpen(false)}
                     className={buttonClasses({
                       variant: 'secondary',
@@ -276,7 +283,7 @@ export default function LandingPage() {
               </p>
               <div className="flex flex-wrap items-center justify-center gap-4">
                 <Link
-                  href="/signup"
+                  href={'/auth/signup' as Route}
                   className={buttonClasses({
                     size: 'lg',
                     className: 'w-full justify-center gap-2 px-8 text-white sm:w-auto'
@@ -285,7 +292,7 @@ export default function LandingPage() {
                   Start free trial <span aria-hidden>-&gt;</span>
                 </Link>
                 <Link
-                  href="/book-demo"
+                  href={'/book-demo' as Route}
                   className={buttonClasses({
                     variant: 'secondary',
                     size: 'lg',
@@ -535,7 +542,7 @@ export default function LandingPage() {
                   </button>
                   <p className="text-xs text-foreground/60">
                     We never share your details. See our{' '}
-                    <Link href="/privacy" className="text-primary hover:underline">
+                    <Link href={'/privacy' as Route} className="text-primary hover:underline">
                       privacy policy
                     </Link>
                     .
@@ -547,7 +554,7 @@ export default function LandingPage() {
 
           <div className="mx-auto mt-10 flex w-full max-w-6xl justify-center">
             <Link
-              href="/contact"
+              href={'/contact' as Route}
               className={buttonClasses({
                 variant: 'outline',
                 size: 'lg',
@@ -592,12 +599,21 @@ export default function LandingPage() {
                   <ul className="space-y-3 text-sm">
                     {section.links.map((link) => (
                       <li key={link.label}>
-                        <Link
-                          href={link.href}
-                          className="text-foreground/70 transition hover:text-primary"
-                        >
-                          {link.label}
-                        </Link>
+                        {'type' in link && link.type === 'anchor' ? (
+                          <a
+                            href={link.href}
+                            className="text-foreground/70 transition hover:text-primary"
+                          >
+                            {link.label}
+                          </a>
+                        ) : (
+                          <Link
+                            href={link.href as Route}
+                            className="text-foreground/70 transition hover:text-primary"
+                          >
+                            {link.label}
+                          </Link>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -607,16 +623,16 @@ export default function LandingPage() {
             <div className="mt-10 flex flex-col gap-3 border-t border-white/60 pt-6 text-xs text-foreground/60 sm:flex-row sm:items-center sm:justify-between">
               <span>&copy; {new Date().getFullYear()} Shomar Security. All rights reserved.</span>
               <div className="flex flex-wrap items-center gap-4">
-                <Link href="/privacy" className="hover:text-foreground">
+                <Link href={'/privacy' as Route} className="hover:text-foreground">
                   Privacy
                 </Link>
-                <Link href="/legal" className="hover:text-foreground">
+                <Link href={'/legal' as Route} className="hover:text-foreground">
                   Terms
                 </Link>
-                <Link href="/trust" className="hover:text-foreground">
+                <Link href={'/trust' as Route} className="hover:text-foreground">
                   Trust Center
                 </Link>
-                <Link href="/docs" className="hover:text-foreground">
+                <Link href={'/docs' as Route} className="hover:text-foreground">
                   Docs
                 </Link>
               </div>
