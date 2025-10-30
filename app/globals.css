@@ -1,0 +1,146 @@
+@import 'tailwindcss';
+
+:root {
+  --background: #f9faff;
+  --foreground: #0f172a;
+  --font-poppins: 'Poppins';
+  --font-geist-mono: 'Geist Mono';
+
+  /* sec_primary */
+  --primary-light: #c3c9ff;
+  --primary-light-hover: #adb6ff;
+  --primary-light-active: #8f9aff;
+  --primary: #0000ff;
+  --primary-hover: #0000e6;
+  --primary-active: #0000cc;
+  --primary-dark: #0000bf;
+  --primary-dark-hover: #000099;
+  --primary-dark-active: #000073;
+  --primary-darker: #000059;
+
+  /* sec_surface */
+  --surface-light: #ffffff;
+  --surface-light-hover: #f4f6ff;
+  --surface-light-active: #e8ecff;
+  --surface-lighter: #f5f6ff;
+  --surface-lighter-hover: #fbfcff;
+  --surface-lighter-active: #e5e9ff;
+
+  /* sec_grey */
+  --grey-lighter: #f4f5f8;
+  --grey-light-hover: #e6e8f2;
+  --grey-light-active: #d8dced;
+  --grey-normal: #bbc2d9;
+  --grey-normal-hover: #9da6c8;
+  --grey-normal-active: #6f7896;
+  --grey-dark: #4c5167;
+  --grey-dark-hover: #3c4156;
+  --grey-dark-active: #2f3345;
+
+  /* sec_severity */
+  --severity-info: #1976d2;
+  --severity-critical: #d32f2f;
+  --severity-high: #f57c00;
+  --severity-medium: #fbc02d;
+  --severity-low: #616161;
+
+  /* mapped convenience variables for Tailwind theme */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-active: var(--primary-active);
+  --color-primary-light: var(--primary-light);
+  --color-primary-light-hover: var(--primary-light-hover);
+  --color-primary-light-active: var(--primary-light-active);
+  --color-surface: var(--surface-light);
+  --color-surface-hover: var(--surface-light-hover);
+  --color-surface-active: var(--surface-light-active);
+  --color-surface-lighter: var(--surface-lighter);
+  --color-surface-lighter-hover: var(--surface-lighter-hover);
+  --color-grey: var(--grey-normal);
+  --color-grey-hover: var(--grey-normal-hover);
+  --color-grey-active: var(--grey-normal-active);
+  --color-grey-dark: var(--grey-dark);
+  --color-grey-dark-hover: var(--grey-dark-hover);
+  --color-grey-dark-active: var(--grey-dark-active);
+  --color-grey-lighter: var(--grey-lighter);
+  --color-grey-light-hover: var(--grey-light-hover);
+  --color-grey-light-normal: var(--grey-light-active);
+  --color-info: var(--severity-info);
+  --color-critical: var(--severity-critical);
+  --color-high: var(--severity-high);
+  --color-medium: var(--severity-medium);
+  --color-low: var(--severity-low);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: light;
+  }
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-poppins), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji';
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-active: var(--primary-active);
+  --color-primary-light: var(--primary-light);
+  --color-primary-light-hover: var(--primary-light-hover);
+  --color-primary-light-active: var(--primary-light-active);
+  --color-surface: var(--surface-light);
+  --color-surface-hover: var(--surface-light-hover);
+  --color-surface-active: var(--surface-light-active);
+  --color-surface-lighter: var(--surface-lighter);
+  --color-surface-lighter-hover: var(--surface-lighter-hover);
+  --color-grey: var(--grey-normal);
+  --color-grey-hover: var(--grey-normal-hover);
+  --color-grey-active: var(--grey-normal-active);
+  --color-grey-dark: var(--grey-dark);
+  --color-grey-dark-hover: var(--grey-dark-hover);
+  --color-grey-dark-active: var(--grey-dark-active);
+  --color-grey-lighter: var(--grey-lighter);
+  --color-grey-light-hover: var(--grey-light-hover);
+  --color-grey-light-normal: var(--grey-light-active);
+  --color-info: var(--severity-info);
+  --color-critical: var(--severity-critical);
+  --color-high: var(--severity-high);
+  --color-medium: var(--severity-medium);
+  --color-low: var(--severity-low);
+  --font-sans: var(--font-poppins);
+  --font-mono: var(--font-geist-mono);
+}
+
+@utility animate-glow {
+  @keyframes glow {
+    0%,
+    100% {
+      box-shadow: 0 0 18px rgba(0, 0, 255, 0.25);
+    }
+    50% {
+      box-shadow: 0 0 26px rgba(0, 0, 255, 0.4);
+    }
+  }
+
+  animation: glow 2.8s ease-in-out infinite;
+}
+
+@utility animate-scan {
+  @keyframes scan {
+    0% {
+      top: 0;
+    }
+    100% {
+      top: 100%;
+    }
+  }
+
+  animation: scan 2.5s linear infinite;
+}
