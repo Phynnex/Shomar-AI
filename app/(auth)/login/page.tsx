@@ -172,9 +172,9 @@ export default function LoginPage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <label htmlFor="password">Password</label>
-                <Link href={'/auth/reset' as Route} className="text-blue-600 hover:text-blue-700">
+                <p className="text-blue-600 hover:text-blue-700">
                   Forgot?
-                </Link>
+                </p>
               </div>
               <input
                 id="password"
@@ -216,7 +216,7 @@ export default function LoginPage() {
 
           <p className="text-sm text-slate-600">
             New to Shomar?{' '}
-            <Link href="/auth/signup" className="font-semibold text-blue-600 hover:text-blue-700">
+            <Link href="/signup" className="font-semibold text-blue-600 hover:text-blue-700">
               Create an account
             </Link>
             .
