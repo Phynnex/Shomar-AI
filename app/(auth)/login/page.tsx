@@ -172,7 +172,7 @@ export default function LoginPage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <label htmlFor="password">Password</label>
-                <Link href="/auth/reset" className="text-blue-600 hover:text-blue-700">
+                <Link href={'/auth/reset' as Route} className="text-blue-600 hover:text-blue-700">
                   Forgot?
                 </Link>
               </div>
