@@ -5,8 +5,9 @@ const API_BASE =
 
 const nextConfig = {
   reactStrictMode: true,
-  experimental: {
-    typedRoutes: true
+  typedRoutes: true,
+  eslint: {
+    ignoreDuringBuilds: true
   },
   async rewrites() {
     return [

@@ -1,7 +1,8 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import type { Route } from 'next';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { buttonClasses } from '@/components/ui/button';
 import { login } from '@/lib/api/auth';
@@ -29,7 +30,14 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const nextUrl = searchParams.get('next') ?? '/dashboard/integrations';
+  const nextUrlParam = searchParams.get('next') ?? '/dashboard/integrations';
+  const nextUrl = useMemo<Route>(() => {
+    if (typeof nextUrlParam === 'string' && nextUrlParam.startsWith('/')) {
+      const pathOnly = nextUrlParam.split('?')[0] || '/dashboard/integrations';
+      return pathOnly as Route;
+    }
+    return '/dashboard/integrations';
+  }, [nextUrlParam]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
