@@ -1,6 +1,8 @@
 'use client';
 
+import { Suspense } from 'react';
 import Link from 'next/link';
+import type { Route } from 'next';
 import { useSearchParams } from 'next/navigation';
 import { buttonClasses } from '@/components/ui/button';
 
@@ -11,7 +13,21 @@ function maskEmail(email: string | null): string {
   return `${user.slice(0, 2)}***@${domain}`;
 }
 
+const suspenseFallback = (
+  <div className="flex min-h-screen items-center justify-center bg-[#f5f7ff] text-sm text-slate-600">
+    Loading verification details…
+  </div>
+);
+
 export default function VerifyEmailPage() {
+  return (
+    <Suspense fallback={suspenseFallback}>
+      <VerifyEmailContent />
+    </Suspense>
+  );
+}
+
+function VerifyEmailContent() {
   const emailParam = useSearchParams().get('email');
 
   return (
@@ -47,7 +63,7 @@ export default function VerifyEmailPage() {
 
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <Link
-              href="/auth/signup"
+              href={'/auth/signup' as Route}
               className={buttonClasses({
                 variant: 'ghost',
                 size: 'lg',
@@ -57,7 +73,7 @@ export default function VerifyEmailPage() {
               Use a different email
             </Link>
             <Link
-              href="/auth/login"
+              href={'/auth/login' as Route}
               className={buttonClasses({
                 size: 'lg',
                 className: 'justify-center bg-blue-600 text-white hover:bg-blue-700'
@@ -71,4 +87,3 @@ export default function VerifyEmailPage() {
     </main>
   );
 }
-
