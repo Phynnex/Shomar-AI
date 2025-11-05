@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { Suspense, FormEvent, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -23,7 +23,21 @@ const initialForm: LoginForm = {
 
 const REMEMBER_KEY = 'shomar_remember_me';
 
+const suspenseFallback = (
+  <div className="flex min-h-screen items-center justify-center bg-[#f5f7ff] text-sm text-slate-600">
+    Loading login…
+  </div>
+);
+
 export default function LoginPage() {
+  return (
+    <Suspense fallback={suspenseFallback}>
+      <LoginContent />
+    </Suspense>
+  );
+}
+
+function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [form, setForm] = useState<LoginForm>(initialForm);
@@ -216,7 +230,7 @@ export default function LoginPage() {
 
           <p className="text-sm text-slate-600">
             New to Shomar?{' '}
-            <Link href="/signup" className="font-semibold text-blue-600 hover:text-blue-700">
+            <Link href={'/auth/signup' as Route} className="font-semibold text-blue-600 hover:text-blue-700">
               Create an account
             </Link>
             .
