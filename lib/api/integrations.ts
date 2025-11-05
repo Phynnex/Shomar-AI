@@ -141,6 +141,19 @@ export type ImportProjectsRequest = {
 };
 
 export type ImportProjectsResponse = {
+  platform_id?: string;
+  platform_name?: string;
+  projects_requested?: number;
+  projects_imported?: number;
+  projects_failed?: number;
+  imported_projects?: Array<{
+    project_id?: string;
+    database_id?: string | null;
+    name?: string;
+    full_name?: string;
+    status?: string;
+    [key: string]: unknown;
+  }>;
   message?: string;
   [key: string]: unknown;
 };

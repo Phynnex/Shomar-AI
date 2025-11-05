@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import type { Route } from 'next';
 
 type ScanMode = 'ai' | 'comprehensive';
 
@@ -13,7 +14,7 @@ type SidebarMode = {
 
 type SidebarNavItem = {
   label: string;
-  href: string;
+  href: Route;
   icon: string;
 };
 
@@ -56,7 +57,7 @@ export function DashboardSidebar({
 
   return (
     <aside className={containerClasses}>
-      <Link href="/dashboard" className="text-2xl font-semibold text-slate-900">
+      <Link href={'/dashboard' as Route} className="text-2xl font-semibold text-slate-900">
         SHOMAR
       </Link>
 

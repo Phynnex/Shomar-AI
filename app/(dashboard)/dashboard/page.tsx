@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Route } from 'next';
 import { DashboardSidebar } from '@/components/dashboard/sidebar';
 import { DashboardHeader } from '@/components/dashboard/header';
 import type { ApiError } from '@/lib/api/http';
@@ -37,13 +38,13 @@ const scanModes: ReadonlyArray<{
 
 const navItems: ReadonlyArray<{
   label: string;
-  href: string;
+  href: Route;
   icon: string;
 }> = [
-  { label: 'Overview', href: '/dashboard', icon: '📊' },
-  { label: 'Findings', href: '/dashboard/findings', icon: '🧾' },
-  { label: 'Policies', href: '/dashboard/policies', icon: '📘' },
-  { label: 'Integrations', href: '/dashboard/integrations', icon: '🔗' }
+  { label: 'Overview', href: '/dashboard' as Route, icon: '📊' },
+  { label: 'Findings', href: '/dashboard/findings' as Route, icon: '🧾' },
+  { label: 'Policies', href: '/dashboard/policies' as Route, icon: '📘' },
+  { label: 'Integrations', href: '/dashboard/integrations' as Route, icon: '🔗' }
 ];
 
 const defaultAiMetrics = [
@@ -383,7 +384,7 @@ export default function DashboardPage() {
         finding.recommendation ||
         'No detailed description provided. Review the raw finding details in the findings panel.';
 
-      return {
+      const normalized: Vulnerability = {
         title: finding.title ?? `Finding ${index + 1}`,
         location: finding.location ?? finding.file_path ?? 'Location unavailable',
         severity,
@@ -393,9 +394,12 @@ export default function DashboardPage() {
         snippet: finding.description
           ? [{ content: finding.description, highlighted: true }]
           : undefined,
+        snippetLabel: finding.description ? 'Finding details' : undefined,
         fixSnippetLabel: finding.recommendation ? 'Suggested remediation' : undefined,
         fixSnippet: finding.recommendation ? [finding.recommendation] : undefined
-      } satisfies Vulnerability;
+      };
+
+      return normalized;
     });
   }, [aiScanResult]);
 
@@ -1040,3 +1044,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+
