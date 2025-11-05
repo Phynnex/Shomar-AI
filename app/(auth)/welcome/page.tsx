@@ -1,16 +1,16 @@
-''use client'';
+'use client';
 
-import { Suspense, useEffect, useState } from ''react'';
-import Link from ''next/link'';
-import type { Route } from ''next'';
-import { useRouter, useSearchParams } from ''next/navigation'';
-import { buttonClasses } from ''@/components/ui/button'';
+import { Suspense, useEffect, useState } from 'react';
+import Link from 'next/link';
+import type { Route } from 'next';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { buttonClasses } from '@/components/ui/button';
 
-type AuthStatus = ''unknown'' | ''authed'' | ''guest'';
+type AuthStatus = 'unknown' | 'authed' | 'guest';
 
 const suspenseFallback = (
   <div className="flex min-h-screen items-center justify-center bg-[#F6F7FF] text-sm text-slate-600">
-    Loading welcome experience…
+    Loading welcome experience...
   </div>
 );
 
@@ -25,9 +25,9 @@ export default function WelcomePage() {
 function WelcomeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const email = searchParams.get(''email'') ?? '';
+  const email = searchParams.get('email') ?? '';
 
-  const [status, setStatus] = useState<AuthStatus>(''unknown'');
+  const [status, setStatus] = useState<AuthStatus>('unknown');
   const [agree, setAgree] = useState(false);
   const [resending, setResending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -37,10 +37,10 @@ function WelcomeContent() {
 
     (async () => {
       try {
-        const response = await fetch(''/api/auth/me'', { credentials: ''include'' });
-        if (!cancelled) setStatus(response.ok ? ''authed'' : ''guest'');
+        const response = await fetch('/api/auth/me', { credentials: 'include' });
+        if (!cancelled) setStatus(response.ok ? 'authed' : 'guest');
       } catch {
-        if (!cancelled) setStatus(''guest'');
+        if (!cancelled) setStatus('guest');
       }
     })();
 
@@ -56,12 +56,12 @@ function WelcomeContent() {
 
     try {
       const redirectUrl = `${window.location.origin}/auth/welcome?email=${encodeURIComponent(email)}`;
-      const response = await fetch(''/api/auth/send-verification'', {
-        method: ''POST'',
-        headers: { ''Content-Type'': ''application/json'' },
+      const response = await fetch('/api/auth/send-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email,
-          verification_type: ''registration'',
+          verification_type: 'registration',
           redirect_url: redirectUrl,
           expires_in_hours: 24
         })
@@ -69,11 +69,11 @@ function WelcomeContent() {
 
       setMessage(
         response.ok
-          ? ''Verification email resent. Check your inbox.''
-          : ''We could not resend the email. Try again later.''
+          ? 'Verification email resent. Check your inbox.'
+          : 'We could not resend the email. Try again later.'
       );
     } catch {
-      setMessage(''We hit a network snag. Try again soon.'');
+      setMessage('We hit a network snag. Try again soon.');
     } finally {
       setResending(false);
     }
@@ -142,8 +142,8 @@ function WelcomeContent() {
             {status === 'unknown'
               ? 'Checking your session...'
               : status === 'authed'
-                ? 'Session active - you are signed in.'
-                : 'You are browsing as a guest.'}
+              ? 'Session active - you are signed in.'
+              : 'You are browsing as a guest.'}
           </div>
 
           <div className="mt-6 space-y-2 text-xs text-foreground/60">
