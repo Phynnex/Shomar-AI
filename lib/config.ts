@@ -9,10 +9,12 @@ export const API_BASE_URL =
     ? ensureTrailingSlash(process.env.NEXT_PUBLIC_API_BASE_URL)
     : DEFAULT_API_BASE;
 
+const DEFAULT_API_KEY = 'sk_admin_0f9fa1d0afdffc4379b4865ea82ed333';
+
 export const API_KEY =
   typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_KEY
     ? process.env.NEXT_PUBLIC_API_KEY
-    : undefined;
+    : DEFAULT_API_KEY;
 
 function ensureTrailingSlash(url: string) {
   return url.endsWith('/') ? url : `${url}/`;
