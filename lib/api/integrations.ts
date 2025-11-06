@@ -1,4 +1,5 @@
 import { get, post } from "@/lib/api/http";
+import type { ApiError } from "@/lib/api/http";
 
 export type PlatformSummary = {
   id?: string;
@@ -87,8 +88,21 @@ export async function discoverProjects({ platformId, page, limit, language }: Di
   if (limit) params.set("limit", String(limit));
   if (language) params.set("language", language);
   const query = params.toString();
-  const path = `/api/v2/integrations/platforms/${platformId}/projects${query ? `?${query}` : ""}`;
-  const res = await get<DiscoverProjectsResponse | DiscoveredProject[]>(path);
+  const encodedId = encodeURIComponent(platformId);
+  const path = `/api/v2/integrations/platforms/${encodedId}/projects${query ? `?${query}` : ""}`;
+  let res: DiscoverProjectsResponse | DiscoveredProject[];
+
+  try {
+    res = await get<DiscoverProjectsResponse | DiscoveredProject[]>(path);
+  } catch (error) {
+    const apiErr = error as ApiError;
+    const baseMessage = apiErr?.message || "Unable to fetch discovered projects.";
+    const enrichedMessage = `${baseMessage} (GET ${path})`;
+    if (apiErr) {
+      apiErr.message = enrichedMessage;
+    }
+    throw error;
+  }
 
   const extractProjects = (): DiscoveredProject[] => {
     if (Array.isArray(res)) return res;

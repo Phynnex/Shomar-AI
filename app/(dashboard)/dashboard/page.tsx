@@ -271,16 +271,14 @@ export default function DashboardPage() {
   const [phaseStatuses, setPhaseStatuses] = useState<PhaseStatus[]>(initialPhaseStatuses);
   const [aiScanResult, setAiScanResult] = useState<ComprehensiveScanResponse | null>(null);
   const [deepScanResult, setDeepScanResult] = useState<ComprehensiveScanResponse | null>(null);
+  const [userSummary, setUserSummary] = useState<{ name: string; email?: string; avatarUrl?: string }>({
+    name: 'Shomar User',
+    email: undefined
+  });
   const [lastImport, setLastImport] = useState<LastImportRecord | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [deepScanError, setDeepScanError] = useState<string | null>(null);
   const [activeProject, setActiveProject] = useState<string | null>(null);
-
-  const activeUser = {
-    name: 'Alex Johnson',
-    email: 'alex@shomarsec.com',
-    avatarUrl: undefined
-  };
 
   const aiTimerRef = useRef<number | null>(null);
   const deepScanTimerRef = useRef<number | null>(null);
@@ -489,6 +487,33 @@ export default function DashboardPage() {
       setActiveProject(null);
     }
   }, [lastImport]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem('user_info');
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as {
+        full_name?: string;
+        first_name?: string;
+        last_name?: string;
+        email?: string;
+        name?: string;
+      };
+      const name =
+        parsed.full_name ||
+        [parsed.first_name, parsed.last_name].filter(Boolean).join(' ') ||
+        parsed.name ||
+        userSummary.name;
+      setUserSummary((prev) => ({
+        name: name.trim() !== '' ? name : prev.name,
+        email: parsed.email || prev.email,
+        avatarUrl: prev.avatarUrl
+      }));
+    } catch {
+      // ignore parse issues; fallback stays
+    }
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -1011,7 +1036,7 @@ export default function DashboardPage() {
       />
 
       <main className="flex flex-1 flex-col">
-        <DashboardHeader user={activeUser} notificationsCount={3} />
+        <DashboardHeader user={userSummary} notificationsCount={3} />
         <div className="flex-1 overflow-y-auto">
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 pb-12 pt-10 sm:px-6 lg:px-12">
             <div className="grid gap-4 lg:hidden">
