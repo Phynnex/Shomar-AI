@@ -1,183 +1,388 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { buttonClasses } from '@/components/ui/button';
 import { FaGithub, FaGitlab, FaBitbucket } from 'react-icons/fa';
 import type { ApiError } from '@/lib/api/http';
 import {
-  connectPlatform,
+  getOAuthSession,
+  listPlatforms,
+  listOAuthProviders,
+  startOAuth,
+  type OAuthProvider,
+  type OAuthSession,
   type PlatformSummary
 } from '@/lib/api/integrations';
 import { readCachedPlatforms, writeCachedPlatforms } from '@/lib/storage/platforms';
 
-type Provider = {
-  key: string;
+type ProviderDisplay = {
+  provider: string;
   label: string;
   description: string;
   accent: string;
   icon: typeof FaGithub;
+  scope?: string[];
+  comingSoon?: boolean;
+  status?: string;
 };
 
-const PROVIDERS: Provider[] = [
-  {
-    key: 'github',
+const PROVIDER_DEFAULTS: Record<
+  string,
+  Omit<ProviderDisplay, 'status'>
+> = {
+  github: {
+    provider: 'github',
     label: 'GitHub',
     description: 'Sync organisations, repos, and branch protections.',
     accent: '#181717',
-    icon: FaGithub
+    icon: FaGithub,
+    scope: ['repo', 'read:org']
   },
-  {
-    key: 'gitlab',
+  gitlab: {
+    provider: 'gitlab',
     label: 'GitLab',
     description: 'Bring in self-hosted or SaaS GitLab groups.',
     accent: '#FC6D26',
-    icon: FaGitlab
+    icon: FaGitlab,
+    scope: ['api']
   },
-  {
-    key: 'bitbucket',
+  bitbucket: {
+    provider: 'bitbucket',
     label: 'Bitbucket',
     description: 'Join the waitlist for early access.',
     accent: '#2684FF',
-    icon: FaBitbucket
+    icon: FaBitbucket,
+    comingSoon: true
   }
-] as const;
-
-type ConnectFormState = {
-  platformName: string;
-  accessToken: string;
-  defaultBranch: string;
-  autoDiscovery: boolean;
 };
 
-const initialConnectForm: ConnectFormState = {
-  platformName: '',
-  accessToken: '',
-  defaultBranch: 'main',
-  autoDiscovery: true
-};
+const POLL_INTERVAL_MS = 1000;
+const POLL_TIMEOUT_MS = 5 * 60 * 1000;
+const TERMINAL_SESSION_STATUSES = new Set(['authorized', 'completed', 'failed', 'expired']);
+const DEFAULT_RETURN_TO_URL = 'https://shomar-production.up.railway.app/dashboard/integrations/oauth-complete';
+const DEFAULT_OAUTH_ORIGIN = 'https://shomar-production.up.railway.app';
+
+function resolveReturnToUrl(win: Window | null): string {
+  const configured = (process.env.NEXT_PUBLIC_OAUTH_RETURN_TO ?? '').trim();
+  if (configured) {
+    try {
+      // Allow full URLs or bases; append default path only when a base is provided.
+      const maybeUrl = new URL(configured);
+      if (maybeUrl.pathname === '/' || maybeUrl.pathname === '') {
+        maybeUrl.pathname = '/dashboard/integrations/oauth-complete';
+      }
+      return maybeUrl.toString();
+    } catch {
+      // Fall through to other strategies if the configured value is invalid.
+    }
+  }
+
+  if (win) {
+    const origin = win.location.origin;
+    const isLocalHost = /^https?:\/\/(localhost|127\.0\.0\.1)/i.test(origin);
+    if (!isLocalHost) {
+      try {
+        return new URL('/dashboard/integrations/oauth-complete', origin).toString();
+      } catch {
+        // Ignore origin parsing issues and fall back to default.
+      }
+    }
+  }
+
+  return DEFAULT_RETURN_TO_URL;
+}
+
+function resolveOAuthOrigin(win: Window | null): string {
+  const configured = (process.env.NEXT_PUBLIC_OAUTH_ORIGIN ?? '').trim();
+  if (configured) {
+    try {
+      return new URL(configured).origin;
+    } catch {
+      // Ignore invalid custom values.
+    }
+  }
+
+  if (win) {
+    const origin = win.location.origin;
+    const isLocalHost = /^https?:\/\/(localhost|127\.0\.0\.1)/i.test(origin);
+    if (!isLocalHost) {
+      return origin;
+    }
+  }
+
+  return DEFAULT_OAUTH_ORIGIN;
+}
+
+function mapToProviderDisplay(provider?: OAuthProvider | null): ProviderDisplay | null {
+  const providerId = provider?.provider?.toLowerCase();
+  if (!providerId) {
+    return null;
+  }
+
+  const defaults = PROVIDER_DEFAULTS[providerId];
+  const label = provider?.label ?? defaults?.label ?? providerId;
+  const descriptionFromApi =
+    typeof provider?.description === 'string' ? provider.description.trim() : '';
+  const accentFromApi = typeof provider?.accent === 'string' ? provider.accent.trim() : '';
+  const scopeFromApi = Array.isArray(provider?.scope) ? provider.scope : undefined;
+  const status = provider?.status;
+  const statusValue = typeof status === 'string' ? status.toLowerCase() : undefined;
+  const apiComingSoon = provider?.comingSoon || provider?.coming_soon;
+
+  return {
+    provider: providerId,
+    label,
+    description: descriptionFromApi || defaults?.description || `Connect ${label}.`,
+    accent: accentFromApi || defaults?.accent || '#0f172a',
+    icon: defaults?.icon ?? FaGithub,
+    scope: scopeFromApi && scopeFromApi.length > 0 ? scopeFromApi : defaults?.scope,
+    comingSoon: Boolean(
+      apiComingSoon ||
+        statusValue === 'coming_soon' ||
+        statusValue === 'waitlist' ||
+        defaults?.comingSoon
+    ),
+    status
+  };
+}
+
+function closePopupWindow(popup: Window | null) {
+  if (!popup) return;
+  try {
+    if (!popup.closed) {
+      popup.close();
+    }
+  } catch {
+    // Ignore cross-origin restrictions when trying to close the popup.
+  }
+}
+
+function isTerminalOAuthSession(session?: OAuthSession | null): boolean {
+  if (!session?.status) return false;
+  return TERMINAL_SESSION_STATUSES.has(session.status.toLowerCase());
+}
+
+function isSuccessfulOAuthSession(session?: OAuthSession | null): boolean {
+  if (!session) return false;
+  if (session.success === false) return false;
+  if (session.error) return false;
+  const status = session.status?.toLowerCase();
+  return status === 'authorized' || status === 'completed';
+}
+
+const MAX_CONSECUTIVE_MISSING_SESSION = 5;
+
+function pollOAuthSession(
+  sessionId: string,
+  popup: Window | null,
+  intervalMs = POLL_INTERVAL_MS,
+  timeoutMs = POLL_TIMEOUT_MS
+): Promise<OAuthSession> {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('OAuth polling is only available in the browser.'));
+  }
+
+  return new Promise((resolve, reject) => {
+    if (!sessionId) {
+      reject(new Error('Missing OAuth session identifier.'));
+      return;
+    }
+
+    const deadline = Date.now() + timeoutMs;
+    let consecutiveMissingSession = 0;
+    const intervalId = window.setInterval(async () => {
+      if (!popup || popup.closed) {
+        window.clearInterval(intervalId);
+        reject(new Error('OAuth cancelled by user.'));
+        return;
+      }
+
+      if (Date.now() >= deadline) {
+        window.clearInterval(intervalId);
+        closePopupWindow(popup);
+        reject(new Error('OAuth timeout. Please try again.'));
+        return;
+      }
+
+      try {
+        const session = await getOAuthSession(sessionId);
+        if (isTerminalOAuthSession(session)) {
+          window.clearInterval(intervalId);
+          closePopupWindow(popup);
+          resolve(session);
+        }
+      } catch (error) {
+        const apiErr = error as ApiError;
+        const status = apiErr?.response?.status ?? 0;
+        const detail =
+          (apiErr?.response?.data as { detail?: string; message?: string } | undefined)?.detail ??
+          (apiErr?.response?.data as { message?: string } | undefined)?.message ??
+          apiErr?.message;
+        const detailLower = detail?.toLowerCase() ?? '';
+        const recoverableMissingSession =
+          status === 404 || detailLower.includes('session not found') || detailLower.includes('expired');
+        if (recoverableMissingSession) {
+          consecutiveMissingSession += 1;
+          if (consecutiveMissingSession >= MAX_CONSECUTIVE_MISSING_SESSION) {
+            window.clearInterval(intervalId);
+            closePopupWindow(popup);
+            reject(new Error('OAuth session not found or expired. Please restart the connection.'));
+            return;
+          }
+        } else {
+          consecutiveMissingSession = 0;
+        }
+        const fatalClientError =
+          status >= 400 &&
+          status < 500 &&
+          status !== 404 &&
+          status !== 409 &&
+          status !== 425 &&
+          status !== 429;
+        if (fatalClientError && !recoverableMissingSession) {
+          window.clearInterval(intervalId);
+          closePopupWindow(popup);
+          reject(error);
+        }
+        // Otherwise swallow and continue polling.
+      }
+    }, intervalMs);
+  });
+}
 
 export default function IntegrationsPage() {
   const [platforms, setPlatforms] = useState<PlatformSummary[]>([]);
+  const [platformsLoading, setPlatformsLoading] = useState(false);
+  const [providers, setProviders] = useState<ProviderDisplay[]>([]);
+  const [providersLoading, setProvidersLoading] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [activeProvider, setActiveProvider] = useState<Provider | null>(null);
-  const [form, setForm] = useState<ConnectFormState>(initialConnectForm);
-  const [submitting, setSubmitting] = useState(false);
+  const [info, setInfo] = useState<string | null>(null);
 
   useEffect(() => {
     const cached = readCachedPlatforms();
     if (cached.length > 0) {
       setPlatforms(cached);
     }
+    void refreshPlatforms();
+    void loadProviders();
   }, []);
 
-  function openConnectModal(provider: Provider) {
-    setActiveProvider(provider);
-    setForm({
-      platformName: `${provider.label} Workspace`,
-      accessToken: '',
-      defaultBranch: 'main',
-      autoDiscovery: true
-    });
-    setError(null);
-    setSuccess(null);
-  }
-
-  function closeConnectModal() {
-    setActiveProvider(null);
-    setForm(initialConnectForm);
-    setSubmitting(false);
-  }
-
-  function updateField<TKey extends keyof ConnectFormState>(key: TKey, value: ConnectFormState[TKey]) {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  }
-
-  async function handleConnect(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!activeProvider) return;
-
-    const provider = activeProvider;
-
-    if (!form.accessToken.trim()) {
-      setError('Provide an access token generated for this platform.');
-      return;
-    }
-    if (!form.platformName.trim()) {
-      setError('Give this connection a display name.');
-      return;
-    }
-
+  async function loadProviders() {
     try {
-      setSubmitting(true);
-      setError(null);
-      const response = await connectPlatform({
-        platform_type: provider.key,
-        platform_name: form.platformName.trim(),
-        credentials: {
-          access_token: form.accessToken.trim()
-        },
-        settings: {
-          default_branch: form.defaultBranch.trim() || 'main',
-          auto_discovery: form.autoDiscovery
-        }
-      });
-      const summary: PlatformSummary = {
-        platform_type: provider.key,
-        platform_name: form.platformName.trim(),
-        status: (response as PlatformSummary)?.status ?? 'connected',
-        connected_at: (response as PlatformSummary)?.connected_at ?? new Date().toISOString(),
-        ...response
-      };
-      setPlatforms((prev) => {
-        const newId = summary.platform_id ?? summary.id;
-        const providerKey = provider.key.toLowerCase();
-        const filtered = prev.filter((platform) => {
-          const platformId = platform.platform_id ?? platform.id;
-          if (newId && platformId) {
-            return platformId !== newId;
-          }
-          return (platform.platform_type ?? '').toLowerCase() !== providerKey;
-        });
-        const next = [...filtered, summary];
-        writeCachedPlatforms(next);
-        return next;
-      });
-      setSuccess(`${provider.label} connected successfully.`);
-      closeConnectModal();
+      setProvidersLoading(true);
+      const response = await listOAuthProviders();
+      const mapped = response
+        .map((provider) => mapToProviderDisplay(provider))
+        .filter((provider): provider is ProviderDisplay => Boolean(provider));
+      if (mapped.length === 0) {
+        setError('No OAuth providers are currently available. Please try again later.');
+      }
+      setProviders(mapped);
     } catch (err) {
       const apiErr = err as ApiError;
-      setError(apiErr?.message || 'Unable to connect platform. Please try again.');
-      setSubmitting(false);
+      setError(apiErr?.message || 'Unable to load OAuth providers.');
+      if (providers.length === 0) {
+        setProviders([]);
+      }
+    } finally {
+      setProvidersLoading(false);
     }
   }
 
-  const connectedTypes = useMemo(() => {
-    return new Set(
-      platforms
-        .map((platform) => (platform.platform_type ?? '').toLowerCase())
-        .filter(Boolean)
-    );
-  }, [platforms]);
+  async function refreshPlatforms(message?: string) {
+    try {
+      setPlatformsLoading(true);
+      const response = await listPlatforms();
+      setPlatforms(response);
+      writeCachedPlatforms(response);
+      if (message) {
+        setInfo(message);
+      }
+    } catch (err) {
+      const apiErr = err as ApiError;
+      setError(apiErr?.message || 'Unable to load connected platforms.');
+    } finally {
+      setPlatformsLoading(false);
+    }
+  }
+
+  async function handleStartOAuth(provider: ProviderDisplay) {
+    if (provider.comingSoon || typeof window === 'undefined') return;
+    let popup: Window | null = null;
+    try {
+      setOauthLoading(provider.provider);
+      setError(null);
+      setInfo(null);
+
+      const returnToUrl = resolveReturnToUrl(typeof window === 'undefined' ? null : window);
+      const oauthOrigin = resolveOAuthOrigin(typeof window === 'undefined' ? null : window);
+      const response = await startOAuth(provider.provider, returnToUrl, {
+        mode: 'popup',
+        params: { origin: oauthOrigin }
+      });
+
+      // Backend returns the polling token as either `session_id` or `state`.
+      const sessionId =
+        response.session_id ?? (response as { sessionId?: string })?.sessionId ?? response.state;
+
+      if (!response.authorization_url) {
+        throw new Error('Authorization URL not returned by server.');
+      }
+      if (!sessionId) {
+        throw new Error('OAuth session identifier was not returned.');
+      }
+
+      popup = window.open(
+        response.authorization_url,
+        `${provider.provider}-oauth`,
+        'width=600,height=700,scrollbars=yes,resizable=yes'
+      );
+
+      if (!popup) {
+        throw new Error('Popup window was blocked. Allow popups to continue the OAuth flow.');
+      }
+
+      setInfo(`Complete the ${provider.label} authorization in the popup window.`);
+      const session = await pollOAuthSession(sessionId, popup);
+
+      if (!isSuccessfulOAuthSession(session)) {
+        throw new Error(session?.error || `Unable to complete ${provider.label} authorization.`);
+      }
+
+      await refreshPlatforms(`Connected ${provider.label}. Continue with project discovery.`);
+      await loadProviders();
+      popup = null;
+    } catch (err) {
+      closePopupWindow(popup);
+      const apiErr = err as ApiError;
+      const responseMessage =
+        (apiErr?.response?.data as { message?: string } | undefined)?.message ?? apiErr?.message;
+      setError(
+        responseMessage || (err instanceof Error ? err.message : `Unable to connect ${provider.label}.`)
+      );
+      setInfo(null);
+    } finally {
+      setOauthLoading(null);
+    }
+  }
 
   return (
     <main className="min-h-screen bg-[#f5f7ff] px-4 py-12 text-slate-900 sm:px-6 lg:px-12">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-10">
         <header className="rounded-3xl border border-slate-200 bg-white px-8 py-10 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-widest text-blue-500">Step 1: Integrate platforms</p>
-          <h1 className="mt-3 text-3xl font-semibold sm:text-4xl">
-            Connect your code pipelines
-          </h1>
+          <h1 className="mt-3 text-3xl font-semibold sm:text-4xl">Connect your code pipelines</h1>
           <p className="mt-4 max-w-3xl text-sm text-slate-600">
-            Link the Git providers your teams rely on. Shomar uses read-only access to map repositories,
-            understand branch protections, and schedule AI SAST scans without slowing down deploys.
+            Launch an OAuth handshake with your Git provider. Once connected, Shomar inventories repositories and keeps
+            discovery in sync without manual tokens.
           </p>
         </header>
 
-        {success && (
+        {info && (
           <div className="rounded-3xl border border-emerald-200 bg-emerald-50 px-6 py-4 text-sm text-emerald-700">
-            {success}
+            {info}
           </div>
         )}
         {error && (
@@ -186,57 +391,94 @@ export default function IntegrationsPage() {
           </div>
         )}
 
-        <section className="grid gap-6 md:grid-cols-3">
-          {PROVIDERS.map((provider) => {
-            const Icon = provider.icon;
-            const isConnected = connectedTypes.has(provider.key);
-            const isComingSoon = provider.key === 'bitbucket';
+        {providersLoading ? (
+          <section className="rounded-3xl border border-slate-200 bg-white px-8 py-6 text-sm text-slate-500 shadow-sm">
+            Loading OAuth providers...
+          </section>
+        ) : providers.length === 0 ? (
+          <section className="rounded-3xl border border-dashed border-slate-300 bg-white px-8 py-6 text-sm text-slate-500 shadow-sm">
+            No OAuth providers are currently available. Please try again in a few minutes or contact support.
+          </section>
+        ) : (
+          <section className="grid gap-6 md:grid-cols-3">
+            {providers.map((provider) => {
+              const Icon = provider.icon;
+              const status = provider.status?.toLowerCase();
+              const comingSoon = provider.comingSoon || status === 'coming_soon' || status === 'waitlist';
+              const isConnected = status === 'connected' || status === 'active';
+              const buttonBusy = oauthLoading === provider.provider;
+              const disabled = comingSoon || buttonBusy;
 
-            return (
-              <article
-                key={provider.key}
-                className={`flex flex-col gap-6 rounded-3xl border px-6 py-8 text-center shadow-sm ${
-                  isComingSoon
-                    ? 'border-dashed border-blue-200 bg-white/70 text-slate-400'
-                    : 'border-blue-100 bg-white'
-                }`}
-              >
-                <span className="mx-auto inline-flex h-16 w-16 items-center justify-center rounded-full bg-blue-50">
-                  <Icon size={28} color={provider.accent} />
-                </span>
-                <div className="space-y-2">
-                  <h2 className="text-lg font-semibold text-slate-900">{provider.label}</h2>
-                  <p className="text-xs uppercase tracking-widest text-blue-500">
-                    {isComingSoon ? 'Coming soon' : isConnected ? 'Connected' : 'Available'}
-                  </p>
-                  <p className="text-sm text-slate-600">{provider.description}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => openConnectModal(provider)}
-                  disabled={isComingSoon}
-                  className={buttonClasses({
-                    variant: isComingSoon ? 'outline' : 'primary',
-                    size: 'lg',
-                    className: `w-full justify-center ${
-                      isComingSoon
-                        ? 'border-blue-300 text-blue-500 hover:bg-blue-50 disabled:cursor-not-allowed'
-                        : 'bg-blue-600 text-white hover:bg-blue-700'
-                    }`
-                  })}
+              return (
+                <article
+                  key={provider.provider}
+                  className={`flex flex-col gap-6 rounded-3xl border px-6 py-8 text-center shadow-sm ${
+                    comingSoon
+                      ? 'border-dashed border-blue-200 bg-white/70 text-slate-400'
+                      : 'border-blue-100 bg-white'
+                  }`}
                 >
-                  {isConnected ? 'Reconnect' : `Connect ${provider.label}`}
-                </button>
-              </article>
-            );
-          })}
-        </section>
+                  <span className="mx-auto inline-flex h-16 w-16 items-center justify-center rounded-full bg-blue-50">
+                    <Icon size={28} color={provider.accent} />
+                  </span>
+                  <div className="space-y-2">
+                    <h2 className="text-lg font-semibold text-slate-900">{provider.label}</h2>
+                    <p className="text-xs uppercase tracking-widest text-blue-500">
+                      {comingSoon ? 'Coming soon' : isConnected ? 'Connected' : 'Available'}
+                    </p>
+                    <p className="text-sm text-slate-600">{provider.description}</p>
+                    {provider.scope && provider.scope.length > 0 && (
+                      <p className="text-xs text-slate-400">Scopes: {provider.scope.join(', ')}</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => handleStartOAuth(provider)}
+                    className={buttonClasses({
+                      variant: comingSoon ? 'outline' : 'primary',
+                      size: 'lg',
+                      className: `w-full justify-center ${
+                        comingSoon
+                          ? 'border-blue-300 text-blue-500 hover:bg-blue-50 disabled:cursor-not-allowed'
+                          : 'bg-blue-600 text-white hover:bg-blue-700'
+                      }`
+                    })}
+                  >
+                    {comingSoon
+                      ? 'Coming soon'
+                      : buttonBusy
+                      ? 'Authorizing...'
+                      : isConnected
+                      ? 'Reconnect'
+                      : `Connect ${provider.label}`}
+                  </button>
+                </article>
+              );
+            })}
+          </section>
+        )}
 
         <section className="rounded-3xl border border-slate-200 bg-white px-8 py-6 text-sm shadow-sm">
-          <h2 className="text-sm font-semibold text-slate-900">Connected platforms</h2>
-          {platforms.length === 0 ? (
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-900">Connected platforms</h2>
+            <button
+              type="button"
+              onClick={() => refreshPlatforms()}
+              className={buttonClasses({
+                variant: 'ghost',
+                size: 'sm',
+                className: 'justify-center text-slate-500 hover:text-slate-900'
+              })}
+            >
+              Refresh
+            </button>
+          </div>
+          {platformsLoading ? (
+            <p className="mt-3 text-sm text-slate-500">Loading connected platforms...</p>
+          ) : platforms.length === 0 ? (
             <p className="mt-3 text-sm text-slate-500">
-              You have not connected any platforms yet. Connect GitHub or GitLab to continue.
+              You have not connected any platforms yet. Start with GitHub or GitLab to continue.
             </p>
           ) : (
             <ul className="mt-4 space-y-3 text-sm text-slate-600">
@@ -250,8 +492,7 @@ export default function IntegrationsPage() {
                       {platform.platform_name ?? platform.platform_type}
                     </p>
                     <p className="text-xs text-slate-500">
-                      Type: {platform.platform_type ?? 'Unknown'} |{' '}
-                      Status: {platform.status ?? 'connected'}
+                      Type: {platform.platform_type ?? 'Unknown'} | Status: {platform.status ?? 'connected'}
                     </p>
                   </div>
                   <span className="text-xs text-slate-400">
@@ -283,103 +524,6 @@ export default function IntegrationsPage() {
           </Link>
         </footer>
       </div>
-
-      {activeProvider && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 py-8">
-          <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-xl">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900">
-                  Connect {activeProvider.label}
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Provide a name and an access token with the scopes required for repository access.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={closeConnectModal}
-                className="text-sm font-semibold text-slate-400 hover:text-slate-600"
-              >
-                Close
-              </button>
-            </div>
-
-            <form className="mt-6 space-y-5" onSubmit={handleConnect}>
-              <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Connection name
-                </label>
-                <input
-                  value={form.platformName}
-                  onChange={(event) => updateField('platformName', event.target.value)}
-                  placeholder={`${activeProvider.label} workspace`}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm transition focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Access token
-                </label>
-                <input
-                  value={form.accessToken}
-                  onChange={(event) => updateField('accessToken', event.target.value)}
-                  placeholder="Paste a personal access token with repo read permissions"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm transition focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                />
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Default branch
-                  </label>
-                  <input
-                    value={form.defaultBranch}
-                    onChange={(event) => updateField('defaultBranch', event.target.value)}
-                    placeholder="main"
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm transition focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                  />
-                </div>
-                <label className="flex items-center gap-3 text-sm text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={form.autoDiscovery}
-                    onChange={(event) => updateField('autoDiscovery', event.target.checked)}
-                    className="h-4 w-4 rounded border border-slate-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span>Enable automatic project discovery after connecting</span>
-                </label>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={closeConnectModal}
-                  className={buttonClasses({
-                    variant: 'ghost',
-                    size: 'sm',
-                    className: 'justify-center text-slate-500 hover:text-slate-700'
-                  })}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className={buttonClasses({
-                    size: 'sm',
-                    className: 'justify-center bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-70'
-                  })}
-                >
-                  {submitting ? 'Connecting...' : 'Connect platform'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </main>
   );
 }
