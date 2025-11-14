@@ -108,10 +108,14 @@ export default function DiscoverPage() {
   function toggleProject(project: DiscoveredProject) {
     setSelectedProjects((prev) => {
       const next = { ...prev };
-      if (next[project.repository_id]) {
-        delete next[project.repository_id];
-      } else if (project.repository_id) {
-        next[project.repository_id] = project;
+      const repoId = project.repository_id?.trim();
+      if (!repoId) {
+        return next;
+      }
+      if (next[repoId]) {
+        delete next[repoId];
+      } else {
+        next[repoId] = project;
       }
       return next;
     });
