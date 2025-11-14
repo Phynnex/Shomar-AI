@@ -120,19 +120,21 @@ export default function ImportPage() {
 
   function addManualProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!manualProject.repository_id.trim() || !manualProject.name.trim()) {
+    const repositoryId = manualProject.repository_id?.trim() ?? '';
+    const projectName = manualProject.name?.trim() ?? '';
+    if (!repositoryId || !projectName) {
       setError('Provide both a repository ID and a project name.');
       return;
     }
 
-    setProjects((prev) => [
-      ...prev,
-      {
-        ...manualProject,
-        id: manualProject.id || generateId(),
-        languages: manualProject.languages ?? []
-      }
-    ]);
+    const normalisedProject: EditableProject = {
+      ...manualProject,
+      id: manualProject.id || generateId(),
+      repository_id: repositoryId,
+      name: projectName,
+      languages: manualProject.languages ?? []
+    };
+    setProjects((prev) => [...prev, normalisedProject]);
     setManualProject({ ...initialManualProject, id: generateId() });
     setError(null);
   }
