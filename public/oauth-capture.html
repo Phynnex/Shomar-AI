@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OAuth Session Capture</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f5f7ff;
+        color: #0f172a;
+      }
+      .card {
+        width: min(640px, 90vw);
+        background: #fff;
+        padding: 2.5rem;
+        border-radius: 1.5rem;
+        box-shadow: 0 25px 65px rgba(15, 23, 42, 0.08);
+        border: 1px solid #e2e8f0;
+      }
+      h1 {
+        margin: 0 0 0.75rem;
+        font-size: 1.75rem;
+      }
+      p {
+        margin: 0 0 1.25rem;
+        line-height: 1.6;
+        color: #475569;
+      }
+      .session {
+        font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+        font-size: 1.1rem;
+        word-break: break-all;
+        padding: 1rem;
+        border-radius: 1rem;
+        background: #f1f5f9;
+        border: 1px solid #cbd5f5;
+        margin-bottom: 1.5rem;
+      }
+      .actions {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+      button {
+        flex: 1;
+        min-width: 160px;
+        border: none;
+        border-radius: 999px;
+        padding: 0.9rem 1.25rem;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+      button.primary {
+        background: #2563eb;
+        color: #fff;
+        box-shadow: 0 10px 30px rgba(37, 99, 235, 0.25);
+      }
+      button.secondary {
+        background: #e2e8f0;
+        color: #0f172a;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        box-shadow: none;
+      }
+      footer {
+        margin-top: 1.25rem;
+        font-size: 0.85rem;
+        color: #94a3b8;
+      }
+      .status {
+        font-size: 0.95rem;
+        margin-top: 0.75rem;
+      }
+      .status.success {
+        color: #16a34a;
+      }
+      .status.error {
+        color: #dc2626;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>OAuth Session Captured</h1>
+      <p>
+        Copy the session identifier below and paste it into Postman as the value for
+        <strong>oauthSessionId</strong>. This page stays open so you can always recover the value.
+      </p>
+
+      <div id="sessionValue" class="session">Looking for session_id…</div>
+
+      <div class="actions">
+        <button id="copyBtn" class="primary" disabled>Copy session_id</button>
+        <button id="openDocsBtn" class="secondary">View instructions</button>
+      </div>
+
+      <div id="status" class="status"></div>
+
+      <footer>Need help? Email <a href="mailto:support@shomarsec.com">support@shomarsec.com</a></footer>
+    </div>
+
+    <script>
+      (function () {
+        const params = new URLSearchParams(window.location.search);
+        const sessionId =
+          params.get('session_id') || params.get('sessionId') || params.get('state') || '';
+        const sessionEl = document.getElementById('sessionValue');
+        const copyBtn = document.getElementById('copyBtn');
+        const statusEl = document.getElementById('status');
+        const docsBtn = document.getElementById('openDocsBtn');
+
+        function setStatus(message, type) {
+          statusEl.textContent = message;
+          statusEl.className = `status ${type}`;
+        }
+
+        function copyToClipboard(value) {
+          if (!value) return;
+          navigator.clipboard
+            .writeText(value)
+            .then(() => setStatus('Session ID copied to clipboard.', 'success'))
+            .catch(() => {
+              setStatus('Copy failed. Please copy manually.', 'error');
+            });
+        }
+
+        if (sessionId) {
+          sessionEl.textContent = sessionId;
+          copyBtn.disabled = false;
+          copyToClipboard(sessionId);
+        } else {
+          sessionEl.textContent = 'No session_id was provided in the query string.';
+          copyBtn.disabled = true;
+          setStatus('Re-run the OAuth flow to generate a session_id.', 'error');
+        }
+
+        copyBtn.addEventListener('click', () => {
+          copyToClipboard(sessionId);
+        });
+
+        docsBtn.addEventListener('click', () => {
+          window.open('https://shomar-ai-wxfa.vercel.app/dashboard/integrations', '_blank');
+        });
+      })();
+    </script>
+  </body>
+</html>

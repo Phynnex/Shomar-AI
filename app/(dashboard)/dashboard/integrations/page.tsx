@@ -63,6 +63,20 @@ const TERMINAL_SESSION_STATUSES = new Set(['authorized', 'completed', 'failed', 
 const DEFAULT_RETURN_TO_URL = 'https://shomar-production.up.railway.app/dashboard/integrations/oauth-complete';
 const DEFAULT_OAUTH_ORIGIN = 'https://shomar-production.up.railway.app';
 
+function enforceHttps(url: string | undefined | null): string | undefined {
+  if (!url) return url || undefined;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'http:') {
+      parsed.protocol = 'https:';
+      return parsed.toString();
+    }
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 function resolveReturnToUrl(win: Window | null): string {
   const configured = (process.env.NEXT_PUBLIC_OAUTH_RETURN_TO ?? '').trim();
   if (configured) {
@@ -72,7 +86,7 @@ function resolveReturnToUrl(win: Window | null): string {
       if (maybeUrl.pathname === '/' || maybeUrl.pathname === '') {
         maybeUrl.pathname = '/dashboard/integrations/oauth-complete';
       }
-      return maybeUrl.toString();
+      return enforceHttps(maybeUrl.toString()) ?? DEFAULT_RETURN_TO_URL;
     } catch {
       // Fall through to other strategies if the configured value is invalid.
     }
@@ -83,21 +97,23 @@ function resolveReturnToUrl(win: Window | null): string {
     const isLocalHost = /^https?:\/\/(localhost|127\.0\.0\.1)/i.test(origin);
     if (!isLocalHost) {
       try {
-        return new URL('/dashboard/integrations/oauth-complete', origin).toString();
+        const resolved = new URL('/dashboard/integrations/oauth-complete', origin).toString();
+        return enforceHttps(resolved) ?? DEFAULT_RETURN_TO_URL;
       } catch {
         // Ignore origin parsing issues and fall back to default.
       }
     }
   }
 
-  return DEFAULT_RETURN_TO_URL;
+  return enforceHttps(DEFAULT_RETURN_TO_URL) ?? DEFAULT_RETURN_TO_URL;
 }
 
 function resolveOAuthOrigin(win: Window | null): string {
   const configured = (process.env.NEXT_PUBLIC_OAUTH_ORIGIN ?? '').trim();
   if (configured) {
     try {
-      return new URL(configured).origin;
+      const origin = new URL(configured).origin;
+      return enforceHttps(origin) ?? DEFAULT_OAUTH_ORIGIN;
     } catch {
       // Ignore invalid custom values.
     }
@@ -107,11 +123,11 @@ function resolveOAuthOrigin(win: Window | null): string {
     const origin = win.location.origin;
     const isLocalHost = /^https?:\/\/(localhost|127\.0\.0\.1)/i.test(origin);
     if (!isLocalHost) {
-      return origin;
+      return enforceHttps(origin) ?? DEFAULT_OAUTH_ORIGIN;
     }
   }
 
-  return DEFAULT_OAUTH_ORIGIN;
+  return enforceHttps(DEFAULT_OAUTH_ORIGIN) ?? DEFAULT_OAUTH_ORIGIN;
 }
 
 function mapToProviderDisplay(provider?: OAuthProvider | null): ProviderDisplay | null {
@@ -171,7 +187,9 @@ function isSuccessfulOAuthSession(session?: OAuthSession | null): boolean {
   return status === 'authorized' || status === 'completed';
 }
 
-const MAX_CONSECUTIVE_MISSING_SESSION = 5;
+const MAX_CONSECUTIVE_MISSING_SESSION = 300;
+const MISSING_SESSION_GRACE_MS = 30 * 1000;
+const POPUP_CLOSE_GRACE_MS = 15 * 1000;
 
 function pollOAuthSession(
   sessionId: string,
@@ -189,16 +207,25 @@ function pollOAuthSession(
       return;
     }
 
-    const deadline = Date.now() + timeoutMs;
+    const startTime = Date.now();
+    const deadline = startTime + timeoutMs;
     let consecutiveMissingSession = 0;
+    let popupClosedAt: number | null = null;
     const intervalId = window.setInterval(async () => {
+      const now = Date.now();
       if (!popup || popup.closed) {
-        window.clearInterval(intervalId);
-        reject(new Error('OAuth cancelled by user.'));
-        return;
+        if (popupClosedAt === null) {
+          popupClosedAt = now;
+        } else if (now - popupClosedAt >= POPUP_CLOSE_GRACE_MS) {
+          window.clearInterval(intervalId);
+          reject(new Error('OAuth cancelled by user.'));
+          return;
+        }
+      } else {
+        popupClosedAt = null;
       }
 
-      if (Date.now() >= deadline) {
+      if (now >= deadline) {
         window.clearInterval(intervalId);
         closePopupWindow(popup);
         reject(new Error('OAuth timeout. Please try again.'));
@@ -224,7 +251,12 @@ function pollOAuthSession(
           status === 404 || detailLower.includes('session not found') || detailLower.includes('expired');
         if (recoverableMissingSession) {
           consecutiveMissingSession += 1;
-          if (consecutiveMissingSession >= MAX_CONSECUTIVE_MISSING_SESSION) {
+          const graceExpired = now - startTime >= MISSING_SESSION_GRACE_MS;
+          if (
+            detailLower.includes('expired') ||
+            consecutiveMissingSession >= MAX_CONSECUTIVE_MISSING_SESSION ||
+            graceExpired
+          ) {
             window.clearInterval(intervalId);
             closePopupWindow(popup);
             reject(new Error('OAuth session not found or expired. Please restart the connection.'));
@@ -323,11 +355,27 @@ export default function IntegrationsPage() {
         params: { origin: oauthOrigin }
       });
 
+      const secureAuthorizationUrl = (() => {
+        const rawUrl = response.authorization_url;
+        if (!rawUrl) return rawUrl;
+        try {
+          const parsed = new URL(rawUrl);
+          const redirectUri = parsed.searchParams.get('redirect_uri');
+          const secureRedirect = enforceHttps(redirectUri);
+          if (secureRedirect && secureRedirect !== redirectUri) {
+            parsed.searchParams.set('redirect_uri', secureRedirect);
+          }
+          return parsed.toString();
+        } catch {
+          return rawUrl;
+        }
+      })();
+
       // Backend returns the polling token as either `session_id` or `state`.
       const sessionId =
         response.session_id ?? (response as { sessionId?: string })?.sessionId ?? response.state;
 
-      if (!response.authorization_url) {
+      if (!secureAuthorizationUrl) {
         throw new Error('Authorization URL not returned by server.');
       }
       if (!sessionId) {
@@ -335,7 +383,7 @@ export default function IntegrationsPage() {
       }
 
       popup = window.open(
-        response.authorization_url,
+        secureAuthorizationUrl,
         `${provider.provider}-oauth`,
         'width=600,height=700,scrollbars=yes,resizable=yes'
       );
