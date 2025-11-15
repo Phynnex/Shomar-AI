@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { ReadonlyURLSearchParams } from 'next/navigation';
 import type { Route } from 'next';
+import { API_KEY } from '@/lib/config';
 import { buttonClasses } from '@/components/ui/button';
 import { FaGithub, FaGitlab, FaBitbucket } from 'react-icons/fa';
 import type { ApiError } from '@/lib/api/http';
@@ -160,14 +161,29 @@ function resolveOAuthOrigin(win: Window | null): string {
   return enforceHttps(DEFAULT_OAUTH_ORIGIN) ?? DEFAULT_OAUTH_ORIGIN;
 }
 
+function appendApiKeyToRedirect(url?: string | null): string | null {
+  if (!url) return null;
+  if (!API_KEY || API_KEY.trim() === '') return url;
+  try {
+    const redirect = new URL(url);
+    if (!redirect.searchParams.has('api_key')) {
+      redirect.searchParams.set('api_key', API_KEY);
+    }
+    return redirect.toString();
+  } catch {
+    return url;
+  }
+}
+
 function sanitizeAuthorizationUrl(url?: string | null): string | null {
   if (!url) return null;
   try {
     const parsed = new URL(url);
     const redirectUri = parsed.searchParams.get('redirect_uri');
     const secureRedirect = enforceHttps(redirectUri);
-    if (secureRedirect && secureRedirect !== redirectUri) {
-      parsed.searchParams.set('redirect_uri', secureRedirect);
+    const redirectWithKey = appendApiKeyToRedirect(secureRedirect ?? redirectUri);
+    if (redirectWithKey && redirectWithKey !== redirectUri) {
+      parsed.searchParams.set('redirect_uri', redirectWithKey);
     }
     return parsed.toString();
   } catch {
