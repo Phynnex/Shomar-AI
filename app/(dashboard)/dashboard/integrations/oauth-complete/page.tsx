@@ -52,7 +52,7 @@ function OAuthCompleteContent() {
               ? `You can return to the integrations dashboard to finish connecting ${provider}.`
               : 'We could not finalise the authorization. Please try again.')}
         </p>
-        <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-center">
+        {/* <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-center">
           <Link
             href="/dashboard/integrations"
             className={buttonClasses({
@@ -64,7 +64,7 @@ function OAuthCompleteContent() {
           </Link>
         </div>
         <p className="mt-4 text-xs text-slate-400">This page will redirect automatically once everything is synced.</p>
-      </div>
+      </div> */}
     </main>
   );
 }

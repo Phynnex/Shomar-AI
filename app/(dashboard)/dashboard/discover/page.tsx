@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { buttonClasses } from '@/components/ui/button';
@@ -27,6 +27,7 @@ export default function DiscoverPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const lastAutoFetchedPlatform = useRef<string | null>(null);
 
   useEffect(() => {
     const cached = readCachedPlatforms();
@@ -80,22 +81,33 @@ export default function DiscoverPage() {
     }));
   }, [platforms]);
 
-  async function handleDiscover(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function runDiscovery(source: 'manual' | 'auto' = 'manual') {
     if (!platformId) {
-      setError('Select a platform to run discovery.');
+      if (source === 'manual') {
+        setError('Select a platform to run discovery.');
+      }
       return;
     }
 
     try {
+      if (source === 'manual') {
+        setError(null);
+        setMessage(null);
+      } else {
+        setMessage('Loading repositories from your connected platform...');
+      }
       setLoading(true);
-      setError(null);
-      setMessage(null);
       const response = await discoverProjects({ platformId, page, limit, language: language || undefined });
-      const items = (response.data ?? response.items ?? []) as DiscoveredProject[];
-      setProjects(items);
-      if (items.length === 0) {
+      const items =
+        (response.data ?? response.items ?? response.projects ?? response['repos']) as DiscoveredProject[] | undefined;
+      setProjects(items ?? []);
+      if ((items?.length ?? 0) === 0) {
         setMessage('No projects found for the selected filters.');
+      } else if (source === 'auto') {
+        const providerName =
+          platforms.find((platform) => (platform.platform_id ?? platform.id) === platformId)?.platform_name ??
+          'platform';
+        setMessage(`Loaded ${items?.length ?? 0} repositories from ${providerName}.`);
       }
     } catch (err) {
       const apiErr = err as ApiError;
@@ -103,6 +115,11 @@ export default function DiscoverPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleDiscover(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await runDiscovery('manual');
   }
 
   function toggleProject(project: DiscoveredProject) {
@@ -299,7 +316,9 @@ export default function DiscoverPage() {
                 {projects.length === 0 && !loading && (
                   <tr>
                     <td className="px-4 py-6 text-center text-sm text-slate-500" colSpan={4}>
-                      Run discovery to load projects.
+                      {platformId
+                        ? 'No repositories available for this platform yet.'
+                        : 'Connect a platform to view repositories.'}
                     </td>
                   </tr>
                 )}
@@ -342,3 +361,9 @@ export default function DiscoverPage() {
     </main>
   );
 }
+  useEffect(() => {
+    if (!platformId) return;
+    if (lastAutoFetchedPlatform.current === platformId) return;
+    lastAutoFetchedPlatform.current = platformId;
+    void runDiscovery('auto');
+  }, [platformId, page, limit, language]);
