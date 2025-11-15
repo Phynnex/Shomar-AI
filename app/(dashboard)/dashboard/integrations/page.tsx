@@ -1,7 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import type { ReadonlyURLSearchParams } from 'next/navigation';
+import type { Route } from 'next';
 import { buttonClasses } from '@/components/ui/button';
 import { FaGithub, FaGitlab, FaBitbucket } from 'react-icons/fa';
 import type { ApiError } from '@/lib/api/http';
@@ -57,11 +60,38 @@ const PROVIDER_DEFAULTS: Record<
   }
 };
 
-const POLL_INTERVAL_MS = 1000;
-const POLL_TIMEOUT_MS = 5 * 60 * 1000;
+const SESSION_POLL_INTERVAL_MS = 1500;
+const SESSION_POLL_TIMEOUT_MS = 2 * 60 * 1000;
 const TERMINAL_SESSION_STATUSES = new Set(['authorized', 'completed', 'failed', 'expired']);
 const DEFAULT_RETURN_TO_URL = 'https://shomar-production.up.railway.app/dashboard/integrations/oauth-complete';
 const DEFAULT_OAUTH_ORIGIN = 'https://shomar-production.up.railway.app';
+
+function extractSessionIdFromParams(params: ReadonlyURLSearchParams | null): string | null {
+  if (!params) return null;
+  const keys = ['oauthSessionId', 'session_id', 'sessionId', 'state'];
+  for (const key of keys) {
+    const value = params.get(key);
+    if (value && value.trim() !== '') {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+function extractProviderFromParams(params: ReadonlyURLSearchParams | null): string | null {
+  if (!params) return null;
+  const value = params.get('provider') ?? params.get('provider_label');
+  return value && value.trim() !== '' ? value.trim() : null;
+}
+
+function decodeParamValue(value?: string | null): string | null {
+  if (!value) return null;
+  try {
+    return decodeURIComponent(value.replace(/\+/g, ' '));
+  } catch {
+    return value;
+  }
+}
 
 function enforceHttps(url: string | undefined | null): string | undefined {
   if (!url) return url || undefined;
@@ -130,6 +160,21 @@ function resolveOAuthOrigin(win: Window | null): string {
   return enforceHttps(DEFAULT_OAUTH_ORIGIN) ?? DEFAULT_OAUTH_ORIGIN;
 }
 
+function sanitizeAuthorizationUrl(url?: string | null): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    const redirectUri = parsed.searchParams.get('redirect_uri');
+    const secureRedirect = enforceHttps(redirectUri);
+    if (secureRedirect && secureRedirect !== redirectUri) {
+      parsed.searchParams.set('redirect_uri', secureRedirect);
+    }
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 function mapToProviderDisplay(provider?: OAuthProvider | null): ProviderDisplay | null {
   const providerId = provider?.provider?.toLowerCase();
   if (!providerId) {
@@ -163,17 +208,6 @@ function mapToProviderDisplay(provider?: OAuthProvider | null): ProviderDisplay 
   };
 }
 
-function closePopupWindow(popup: Window | null) {
-  if (!popup) return;
-  try {
-    if (!popup.closed) {
-      popup.close();
-    }
-  } catch {
-    // Ignore cross-origin restrictions when trying to close the popup.
-  }
-}
-
 function isTerminalOAuthSession(session?: OAuthSession | null): boolean {
   if (!session?.status) return false;
   return TERMINAL_SESSION_STATUSES.has(session.status.toLowerCase());
@@ -187,103 +221,47 @@ function isSuccessfulOAuthSession(session?: OAuthSession | null): boolean {
   return status === 'authorized' || status === 'completed';
 }
 
-const MAX_CONSECUTIVE_MISSING_SESSION = 300;
-const MISSING_SESSION_GRACE_MS = 30 * 1000;
-const POPUP_CLOSE_GRACE_MS = 15 * 1000;
-
-function pollOAuthSession(
+async function waitForOAuthSession(
   sessionId: string,
-  popup: Window | null,
-  intervalMs = POLL_INTERVAL_MS,
-  timeoutMs = POLL_TIMEOUT_MS
+  timeoutMs = SESSION_POLL_TIMEOUT_MS,
+  intervalMs = SESSION_POLL_INTERVAL_MS
 ): Promise<OAuthSession> {
-  if (typeof window === 'undefined') {
-    return Promise.reject(new Error('OAuth polling is only available in the browser.'));
+  if (!sessionId) {
+    throw new Error('Missing OAuth session identifier.');
   }
 
-  return new Promise((resolve, reject) => {
-    if (!sessionId) {
-      reject(new Error('Missing OAuth session identifier.'));
-      return;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const session = await getOAuthSession(sessionId);
+      if (isTerminalOAuthSession(session)) {
+        return session;
+      }
+    } catch (error) {
+      const apiErr = error as ApiError;
+      const status = apiErr?.response?.status ?? 0;
+      const detail =
+        (apiErr?.response?.data as { detail?: string; message?: string } | undefined)?.detail ??
+        (apiErr?.response?.data as { message?: string } | undefined)?.message ??
+        apiErr?.message;
+      const detailLower = detail?.toLowerCase() ?? '';
+      const recoverableMissingSession =
+        status === 404 || status === 409 || status === 425 || status === 429 || detailLower.includes('session not found');
+      if (!recoverableMissingSession) {
+        throw error;
+      }
     }
 
-    const startTime = Date.now();
-    const deadline = startTime + timeoutMs;
-    let consecutiveMissingSession = 0;
-    let popupClosedAt: number | null = null;
-    const intervalId = window.setInterval(async () => {
-      const now = Date.now();
-      if (!popup || popup.closed) {
-        if (popupClosedAt === null) {
-          popupClosedAt = now;
-        } else if (now - popupClosedAt >= POPUP_CLOSE_GRACE_MS) {
-          window.clearInterval(intervalId);
-          reject(new Error('OAuth cancelled by user.'));
-          return;
-        }
-      } else {
-        popupClosedAt = null;
-      }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
 
-      if (now >= deadline) {
-        window.clearInterval(intervalId);
-        closePopupWindow(popup);
-        reject(new Error('OAuth timeout. Please try again.'));
-        return;
-      }
-
-      try {
-        const session = await getOAuthSession(sessionId);
-        if (isTerminalOAuthSession(session)) {
-          window.clearInterval(intervalId);
-          closePopupWindow(popup);
-          resolve(session);
-        }
-      } catch (error) {
-        const apiErr = error as ApiError;
-        const status = apiErr?.response?.status ?? 0;
-        const detail =
-          (apiErr?.response?.data as { detail?: string; message?: string } | undefined)?.detail ??
-          (apiErr?.response?.data as { message?: string } | undefined)?.message ??
-          apiErr?.message;
-        const detailLower = detail?.toLowerCase() ?? '';
-        const recoverableMissingSession =
-          status === 404 || detailLower.includes('session not found') || detailLower.includes('expired');
-        if (recoverableMissingSession) {
-          consecutiveMissingSession += 1;
-          const graceExpired = now - startTime >= MISSING_SESSION_GRACE_MS;
-          if (
-            detailLower.includes('expired') ||
-            consecutiveMissingSession >= MAX_CONSECUTIVE_MISSING_SESSION ||
-            graceExpired
-          ) {
-            window.clearInterval(intervalId);
-            closePopupWindow(popup);
-            reject(new Error('OAuth session not found or expired. Please restart the connection.'));
-            return;
-          }
-        } else {
-          consecutiveMissingSession = 0;
-        }
-        const fatalClientError =
-          status >= 400 &&
-          status < 500 &&
-          status !== 404 &&
-          status !== 409 &&
-          status !== 425 &&
-          status !== 429;
-        if (fatalClientError && !recoverableMissingSession) {
-          window.clearInterval(intervalId);
-          closePopupWindow(popup);
-          reject(error);
-        }
-        // Otherwise swallow and continue polling.
-      }
-    }, intervalMs);
-  });
+  throw new Error('Timed out while finalising OAuth session.');
 }
 
 export default function IntegrationsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const processedRedirectRef = useRef<string | null>(null);
   const [platforms, setPlatforms] = useState<PlatformSummary[]>([]);
   const [platformsLoading, setPlatformsLoading] = useState(false);
   const [providers, setProviders] = useState<ProviderDisplay[]>([]);
@@ -291,6 +269,81 @@ export default function IntegrationsPage() {
   const [oauthLoading, setOauthLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+
+  function clearOAuthQueryParams() {
+    if (!searchParams) return;
+    const keys = [
+      'oauthSessionId',
+      'session_id',
+      'sessionId',
+      'state',
+      'status',
+      'provider',
+      'provider_label',
+      'error',
+      'error_description',
+      'message'
+    ];
+    const shouldClear = keys.some((key) => searchParams.get(key));
+    if (!shouldClear) return;
+    const remaining = new URLSearchParams(searchParams.toString());
+    keys.forEach((key) => remaining.delete(key));
+    const query = remaining.toString();
+    const href = query ? `/dashboard/integrations?${query}` : '/dashboard/integrations';
+    router.replace(href as Route, { scroll: false });
+  }
+
+  useEffect(() => {
+    if (!searchParams) return;
+    const sessionId = extractSessionIdFromParams(searchParams);
+    const providerHint = extractProviderFromParams(searchParams);
+    const errorParam = decodeParamValue(searchParams.get('error') ?? searchParams.get('error_description'));
+    const key = `${sessionId ?? ''}|${errorParam ?? ''}|${providerHint ?? ''}`;
+
+    if (!sessionId && !errorParam) {
+      processedRedirectRef.current = null;
+      return;
+    }
+
+    if (processedRedirectRef.current === key) {
+      return;
+    }
+    processedRedirectRef.current = key;
+
+    async function finalizeRedirect() {
+      if (errorParam && !sessionId) {
+        setError(errorParam);
+        setInfo(null);
+        clearOAuthQueryParams();
+        return;
+      }
+      if (!sessionId) return;
+
+      try {
+        setInfo('Finishing OAuth connection...');
+        setError(null);
+        setOauthLoading(providerHint ?? 'oauth');
+        const session = await waitForOAuthSession(sessionId);
+        if (!isSuccessfulOAuthSession(session)) {
+          throw new Error(session?.error || `Unable to complete ${session?.provider ?? 'OAuth'} connection.`);
+        }
+        const providerLabel = session.provider ?? providerHint ?? 'your platform';
+        await refreshPlatforms(`Connected ${providerLabel}. Continue with project discovery.`);
+        setInfo(`Connected ${providerLabel}. Continue with project discovery.`);
+      } catch (err) {
+        const apiErr = err as ApiError;
+        const responseMessage =
+          (apiErr?.response?.data as { message?: string } | undefined)?.message ?? apiErr?.message;
+        setError(responseMessage || (err instanceof Error ? err.message : 'Unable to finalise OAuth session.'));
+        setInfo(null);
+      } finally {
+        setOauthLoading(null);
+        clearOAuthQueryParams();
+      }
+    }
+
+    void finalizeRedirect();
+  }, [searchParams]);
 
   useEffect(() => {
     const cached = readCachedPlatforms();
@@ -342,68 +395,25 @@ export default function IntegrationsPage() {
 
   async function handleStartOAuth(provider: ProviderDisplay) {
     if (provider.comingSoon || typeof window === 'undefined') return;
-    let popup: Window | null = null;
     try {
       setOauthLoading(provider.provider);
       setError(null);
-      setInfo(null);
+      setInfo('Redirecting to provider...');
 
-      const returnToUrl = resolveReturnToUrl(typeof window === 'undefined' ? null : window);
-      const oauthOrigin = resolveOAuthOrigin(typeof window === 'undefined' ? null : window);
+      const returnToUrl = resolveReturnToUrl(window);
+      const oauthOrigin = resolveOAuthOrigin(window);
       const response = await startOAuth(provider.provider, returnToUrl, {
-        mode: 'popup',
+        mode: 'redirect',
         params: { origin: oauthOrigin }
       });
 
-      const secureAuthorizationUrl = (() => {
-        const rawUrl = response.authorization_url;
-        if (!rawUrl) return rawUrl;
-        try {
-          const parsed = new URL(rawUrl);
-          const redirectUri = parsed.searchParams.get('redirect_uri');
-          const secureRedirect = enforceHttps(redirectUri);
-          if (secureRedirect && secureRedirect !== redirectUri) {
-            parsed.searchParams.set('redirect_uri', secureRedirect);
-          }
-          return parsed.toString();
-        } catch {
-          return rawUrl;
-        }
-      })();
-
-      // Backend returns the polling token as either `session_id` or `state`.
-      const sessionId =
-        response.session_id ?? (response as { sessionId?: string })?.sessionId ?? response.state;
-
-      if (!secureAuthorizationUrl) {
+      const authorizationUrl = sanitizeAuthorizationUrl(response.authorization_url);
+      if (!authorizationUrl) {
         throw new Error('Authorization URL not returned by server.');
       }
-      if (!sessionId) {
-        throw new Error('OAuth session identifier was not returned.');
-      }
 
-      popup = window.open(
-        secureAuthorizationUrl,
-        `${provider.provider}-oauth`,
-        'width=600,height=700,scrollbars=yes,resizable=yes'
-      );
-
-      if (!popup) {
-        throw new Error('Popup window was blocked. Allow popups to continue the OAuth flow.');
-      }
-
-      setInfo(`Complete the ${provider.label} authorization in the popup window.`);
-      const session = await pollOAuthSession(sessionId, popup);
-
-      if (!isSuccessfulOAuthSession(session)) {
-        throw new Error(session?.error || `Unable to complete ${provider.label} authorization.`);
-      }
-
-      await refreshPlatforms(`Connected ${provider.label}. Continue with project discovery.`);
-      await loadProviders();
-      popup = null;
+      window.location.assign(authorizationUrl);
     } catch (err) {
-      closePopupWindow(popup);
       const apiErr = err as ApiError;
       const responseMessage =
         (apiErr?.response?.data as { message?: string } | undefined)?.message ?? apiErr?.message;
@@ -411,7 +421,6 @@ export default function IntegrationsPage() {
         responseMessage || (err instanceof Error ? err.message : `Unable to connect ${provider.label}.`)
       );
       setInfo(null);
-    } finally {
       setOauthLoading(null);
     }
   }
