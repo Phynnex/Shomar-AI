@@ -62,9 +62,9 @@ function OAuthCompleteContent() {
           >
             Back to integrations
           </Link>
-        </div>
+        </div> */}
         <p className="mt-4 text-xs text-slate-400">This page will redirect automatically once everything is synced.</p>
-      </div> */}
+      </div>
     </main>
   );
 }
